@@ -22,31 +22,31 @@
 
 	let { data } = $props();
 	let pages = $derived(data.pages);
-	let navigation = $derived(data.navigation);
+	let sections = $derived(data.sections);
 	let validPages = $derived(new Set(data.validPages));
 
 	let selectedPage = $state('Home');
-	let expandedHub: string | null = $state(null);
+	let expandedSection: string | null = $state(null);
+	let hoveredSlug: string | null = $state(null);
 
 	$effect(() => {
 		if (typeof localStorage !== 'undefined') {
-			const stored = localStorage.getItem('wiki-expanded-hub');
+			const stored = localStorage.getItem('wiki-expanded-section');
 			if (stored) {
-				expandedHub = stored;
+				expandedSection = stored;
 			}
 		}
 	});
 
-	function toggleHub(hubTitle: string) {
-		expandedHub = expandedHub === hubTitle ? null : hubTitle;
+	function toggleSection(title: string) {
+		expandedSection = expandedSection === title ? null : title;
 		if (typeof localStorage !== 'undefined') {
-			if (expandedHub) {
-				localStorage.setItem('wiki-expanded-hub', expandedHub);
+			if (expandedSection) {
+				localStorage.setItem('wiki-expanded-section', expandedSection);
 			} else {
-				localStorage.removeItem('wiki-expanded-hub');
+				localStorage.removeItem('wiki-expanded-section');
 			}
 		}
-		selectPage(hubTitle);
 	}
 
 	function speedRead(slug: string, e: MouseEvent) {
@@ -64,11 +64,13 @@
 	}
 
 	function renderMarkdown(content: string): string {
-		const processed = content.replace(/\[\[([^\]]+)\]\]/g, (_, name) => {
-			if (validPages.has(name)) {
-				return `<a class="wikilink" data-page="${name}" href="#">${name}</a>`;
+		const processed = content.replace(/\[\[([^\]]+)\]\]/g, (_, raw) => {
+			const slug = raw.includes('|') ? raw.split('|')[0] : raw;
+			const display = raw.includes('|') ? raw.split('|')[1] : raw;
+			if (validPages.has(slug)) {
+				return `<a class="wikilink" data-page="${slug}" href="#">${display}</a>`;
 			}
-			return name;
+			return display;
 		});
 		return marked.parse(processed, { async: false }) as string;
 	}
@@ -101,7 +103,7 @@
 			<p style="display: inline-block; font-size: 13px; font-weight: 500; font-family: var(--font-sans); background: var(--gradient-accent); background-repeat: no-repeat; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Our Wiki</p>
 		</div>
 
-		<div class="wiki-nav-row">
+		<div class="wiki-nav-row" onmouseenter={() => hoveredSlug = 'Home'} onmouseleave={() => hoveredSlug = null}>
 			<button
 				class="wiki-nav-item wiki-nav-home"
 				class:active={selectedPage === 'Home'}
@@ -109,17 +111,19 @@
 			>
 				Home
 			</button>
-			<button class="wiki-speed-btn" onclick={(e) => speedRead('Home', e)} title="Speed read">
-				<Gauge size={14} color="#555" />
-			</button>
+			{#if hoveredSlug === 'Home'}
+				<button class="wiki-speed-btn wiki-speed-visible" onclick={(e) => speedRead('Home', e)} title="Speed read">
+					<Gauge size={14} color="#555" />
+				</button>
+			{/if}
 		</div>
 
-		{#each navigation as hub}
+		{#each sections as section}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div class="wiki-section-header wiki-hub-header" onclick={() => toggleHub(hub.title)}>
-				<p style="display: inline-block; font-size: 13px; font-weight: 500; font-family: var(--font-sans); background: var(--gradient-accent); background-repeat: no-repeat; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">{hub.title}</p>
+			<div class="wiki-section-header wiki-section-toggle" onclick={() => toggleSection(section.title)}>
+				<p style="display: inline-block; font-size: 13px; font-weight: 500; font-family: var(--font-sans); background: var(--gradient-accent); background-repeat: no-repeat; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">{section.title}</p>
 				<span class="wiki-chevron">
-					{#if expandedHub === hub.title}
+					{#if expandedSection === section.title}
 						<ChevronUp size={12} color="#7a5e4a" />
 					{:else}
 						<ChevronDown size={12} color="#7a5e4a" />
@@ -127,20 +131,42 @@
 				</span>
 			</div>
 
-			{#if expandedHub === hub.title}
-				{#each hub.children as child}
-					<div class="wiki-nav-row">
+			{#if expandedSection === section.title}
+				{#each section.pages as page}
+					<div class="wiki-nav-row" onmouseenter={() => hoveredSlug = page.slug} onmouseleave={() => hoveredSlug = null}>
 						<button
 							class="wiki-nav-item wiki-nav-child"
-							class:active={selectedPage === child.slug}
-							onclick={() => selectPage(child.slug)}
+							class:active={selectedPage === page.slug}
+							onclick={() => selectPage(page.slug)}
 						>
-							{child.title}
+							{page.title}
 						</button>
-						<button class="wiki-speed-btn" onclick={(e) => speedRead(child.slug, e)} title="Speed read">
-							<Gauge size={14} color="#555" />
-						</button>
+						{#if hoveredSlug === page.slug}
+							<button class="wiki-speed-btn wiki-speed-visible" onclick={(e) => speedRead(page.slug, e)} title="Speed read">
+								<Gauge size={14} color="#555" />
+							</button>
+						{/if}
 					</div>
+				{/each}
+
+				{#each section.groups as group}
+					<div class="wiki-nav-group-label">{group.title}</div>
+					{#each group.pages as page}
+						<div class="wiki-nav-row" onmouseenter={() => hoveredSlug = page.slug} onmouseleave={() => hoveredSlug = null}>
+							<button
+								class="wiki-nav-item wiki-nav-grouped-child"
+								class:active={selectedPage === page.slug}
+								onclick={() => selectPage(page.slug)}
+							>
+								{page.title}
+							</button>
+							{#if hoveredSlug === page.slug}
+								<button class="wiki-speed-btn wiki-speed-visible" onclick={(e) => speedRead(page.slug, e)} title="Speed read">
+									<Gauge size={14} color="#555" />
+								</button>
+							{/if}
+						</div>
+					{/each}
 				{/each}
 			{/if}
 		{/each}
@@ -169,7 +195,7 @@
 						{@html renderedContent}
 					</article>
 				{/if}
-				<div class="wiki-cache-code">Cache Code: T5B</div>
+				<div class="wiki-cache-code">Cache Code: V8P</div>
 			</div>
 		</div>
 	</main>
@@ -199,14 +225,14 @@
 		border-bottom: 1px dashed var(--color-bg-step4);
 	}
 
-	.wiki-hub-header {
+	.wiki-section-toggle {
 		cursor: pointer;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 	}
 
-	.wiki-hub-header:hover {
+	.wiki-section-toggle:hover {
 		background: rgba(255, 255, 255, 0.02);
 	}
 
@@ -226,12 +252,10 @@
 		border: none;
 		cursor: pointer;
 		padding: 0 0.5rem;
-		opacity: 0;
-		transition: opacity 0.15s;
 		flex-shrink: 0;
 	}
 
-	.wiki-nav-row:hover .wiki-speed-btn {
+	.wiki-speed-visible {
 		opacity: 1;
 	}
 
@@ -266,6 +290,18 @@
 
 	.wiki-nav-child {
 		padding-left: 2.5rem;
+	}
+
+	.wiki-nav-group-label {
+		padding: 0.5rem 1rem 0.25rem 2.5rem;
+		font-size: 11px;
+		color: #7a5e4a;
+		font-family: var(--font-sans);
+		text-transform: lowercase;
+	}
+
+	.wiki-nav-grouped-child {
+		padding-left: 3.5rem;
 	}
 
 	/* Reading Pane */

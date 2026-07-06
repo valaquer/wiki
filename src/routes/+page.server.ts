@@ -10,10 +10,20 @@ interface WikiPage {
 	frontmatter: Record<string, string>;
 }
 
-interface NavItem {
+interface SidebarPage {
 	slug: string;
 	title: string;
-	children: NavItem[];
+}
+
+interface SidebarGroup {
+	title: string;
+	pages: SidebarPage[];
+}
+
+interface SidebarSection {
+	title: string;
+	groups: SidebarGroup[];
+	pages: SidebarPage[];
 }
 
 function parseFrontmatter(raw: string): { frontmatter: Record<string, string>; content: string } {
@@ -33,64 +43,116 @@ function extractWikilinks(content: string): string[] {
 	const re = /\[\[([^\]]+)\]\]/g;
 	let m;
 	while ((m = re.exec(content)) !== null) {
-		links.push(m[1]);
+		const raw = m[1];
+		const slug = raw.includes("|") ? raw.split("|")[0] : raw;
+		links.push(slug);
 	}
 	return links;
 }
 
+async function loadSidebarOrder(): Promise<string[]> {
+	try {
+		const raw = await readFile(path.join(WIKI_DIR, "SIDEBAR.md"), "utf-8");
+		return raw
+			.split("\n")
+			.map((l) => l.replace(/^[-*]\s*/, "").trim())
+			.filter((l) => l.length > 0 && !l.startsWith("#"));
+	} catch {
+		return [];
+	}
+}
+
 export async function load() {
 	const files = await readdir(WIKI_DIR);
-	const mdFiles = files.filter((f) => f.endsWith(".md")).sort();
+	const mdFiles = files.filter((f) => f.endsWith(".md") && f !== "SIDEBAR.md").sort();
 
 	const pages: Record<string, WikiPage> = {};
-	const titleToSlug: Record<string, string> = {};
 
 	for (const file of mdFiles) {
 		const raw = await readFile(path.join(WIKI_DIR, file), "utf-8");
 		const slug = file.replace(/\.md$/, "");
 		const { frontmatter, content } = parseFrontmatter(raw);
-
 		pages[slug] = { slug, title: slug, content, frontmatter };
-		titleToSlug[slug] = slug;
 	}
 
-	const home = pages["Home"];
-	const navigation: NavItem[] = [];
+	const sidebarOrder = await loadSidebarOrder();
 
-	if (home) {
-		const hubPattern = /\[\[([^\]]+)\]\]\s*[–-]\s*(.+)/g;
-		let match;
-		while ((match = hubPattern.exec(home.content)) !== null) {
-			const hubTitle = match[1];
-			if (!(hubTitle in titleToSlug)) continue;
+	// Build sections from frontmatter
+	const sectionMap = new Map<string, { groups: Map<string, SidebarPage[]>; pages: SidebarPage[] }>();
 
-			const hubPage = pages[hubTitle];
-			const children: NavItem[] = [];
+	for (const [slug, page] of Object.entries(pages)) {
+		if (slug === "Home") continue;
 
-			if (hubPage) {
-				const childLinks = extractWikilinks(hubPage.content);
-				for (const link of childLinks) {
-					if (link in titleToSlug && link !== hubTitle) {
-						if (!children.some((c) => c.slug === link)) {
-							children.push({ slug: link, title: link, children: [] });
-						}
-					}
-				}
-			}
+		const section = page.frontmatter.section;
+		if (!section) continue;
 
-			navigation.push({
-				slug: hubTitle,
-				title: hubTitle,
-				children,
-			});
+		if (!sectionMap.has(section)) {
+			sectionMap.set(section, { groups: new Map(), pages: [] });
 		}
+
+		const sectionData = sectionMap.get(section)!;
+		const group = page.frontmatter.group;
+
+		if (group) {
+			if (!sectionData.groups.has(group)) sectionData.groups.set(group, []);
+			sectionData.groups.get(group)!.push({ slug, title: slug });
+		} else {
+			sectionData.pages.push({ slug, title: slug });
+		}
+	}
+
+	// Build ordered sections array
+	const sections: SidebarSection[] = [];
+	const addedSections = new Set<string>();
+
+	// First: sections in SIDEBAR.md order
+	for (const sectionTitle of sidebarOrder) {
+		const data = sectionMap.get(sectionTitle);
+		if (!data) continue;
+
+		const groups: SidebarGroup[] = [];
+		for (const [groupTitle, groupPages] of data.groups) {
+			groups.push({ title: groupTitle, pages: groupPages });
+		}
+		groups.sort((a, b) => a.title.localeCompare(b.title));
+
+		sections.push({ title: sectionTitle, groups, pages: data.pages });
+		addedSections.add(sectionTitle);
+	}
+
+	// Then: sections not in SIDEBAR.md (auto-appear at bottom, alphabetical)
+	const unlisted = [...sectionMap.keys()]
+		.filter((s) => !addedSections.has(s))
+		.sort();
+
+	for (const sectionTitle of unlisted) {
+		const data = sectionMap.get(sectionTitle)!;
+		const groups: SidebarGroup[] = [];
+		for (const [groupTitle, groupPages] of data.groups) {
+			groups.push({ title: groupTitle, pages: groupPages });
+		}
+		groups.sort((a, b) => a.title.localeCompare(b.title));
+
+		sections.push({ title: sectionTitle, groups, pages: data.pages });
+	}
+
+	// Unsorted: pages without section
+	const unsortedPages: SidebarPage[] = [];
+	for (const [slug, page] of Object.entries(pages)) {
+		if (slug === "Home") continue;
+		if (!page.frontmatter.section) {
+			unsortedPages.push({ slug, title: slug });
+		}
+	}
+	if (unsortedPages.length > 0) {
+		sections.push({ title: "Unsorted", groups: [], pages: unsortedPages });
 	}
 
 	const validPages = new Set(Object.keys(pages));
 
 	return {
 		pages,
-		navigation,
+		sections,
 		validPages: [...validPages],
 	};
 }
