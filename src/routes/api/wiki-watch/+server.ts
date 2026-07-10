@@ -18,7 +18,7 @@ export function GET() {
 
 			let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-			const watcher = watch(WIKI_DIR, (eventType, filename) => {
+			const watcher = watch(WIKI_DIR, { recursive: true }, (eventType, filename) => {
 				if (!filename?.endsWith(".md")) return;
 				if (debounceTimer) clearTimeout(debounceTimer);
 				debounceTimer = setTimeout(() => {

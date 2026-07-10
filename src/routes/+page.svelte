@@ -195,7 +195,7 @@
 						{@html renderedContent}
 					</article>
 				{/if}
-				<div class="wiki-cache-code">Cache Code: V8P</div>
+				<div class="wiki-cache-code">Cache Code: W3F</div>
 			</div>
 		</div>
 	</main>

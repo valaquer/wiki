@@ -63,16 +63,30 @@ async function loadSidebarOrder(): Promise<string[]> {
 }
 
 export async function load() {
-	const files = await readdir(WIKI_DIR);
-	const mdFiles = files.filter((f) => f.endsWith(".md") && f !== "SIDEBAR.md").sort();
-
+	const entries = await readdir(WIKI_DIR, { withFileTypes: true });
 	const pages: Record<string, WikiPage> = {};
 
-	for (const file of mdFiles) {
-		const raw = await readFile(path.join(WIKI_DIR, file), "utf-8");
-		const slug = file.replace(/\.md$/, "");
+	// Root-level .md files
+	for (const entry of entries) {
+		if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name === "SIDEBAR.md") continue;
+		const raw = await readFile(path.join(WIKI_DIR, entry.name), "utf-8");
+		const slug = entry.name.replace(/\.md$/, "");
 		const { frontmatter, content } = parseFrontmatter(raw);
 		pages[slug] = { slug, title: slug, content, frontmatter };
+	}
+
+	// Subdirectory .md files
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
+		const subdir = entry.name;
+		const subFiles = await readdir(path.join(WIKI_DIR, subdir));
+		for (const file of subFiles.filter((f) => f.endsWith(".md")).sort()) {
+			const raw = await readFile(path.join(WIKI_DIR, subdir, file), "utf-8");
+			const slug = `${subdir}/${file.replace(/\.md$/, "")}`;
+			const title = file.replace(/\.md$/, "");
+			const { frontmatter, content } = parseFrontmatter(raw);
+			pages[slug] = { slug, title, content, frontmatter };
+		}
 	}
 
 	const sidebarOrder = await loadSidebarOrder();
@@ -95,9 +109,9 @@ export async function load() {
 
 		if (group) {
 			if (!sectionData.groups.has(group)) sectionData.groups.set(group, []);
-			sectionData.groups.get(group)!.push({ slug, title: slug });
+			sectionData.groups.get(group)!.push({ slug, title: page.title });
 		} else {
-			sectionData.pages.push({ slug, title: slug });
+			sectionData.pages.push({ slug, title: page.title });
 		}
 	}
 
@@ -141,7 +155,7 @@ export async function load() {
 	for (const [slug, page] of Object.entries(pages)) {
 		if (slug === "Home") continue;
 		if (!page.frontmatter.section) {
-			unsortedPages.push({ slug, title: slug });
+			unsortedPages.push({ slug, title: page.title });
 		}
 	}
 	if (unsortedPages.length > 0) {
