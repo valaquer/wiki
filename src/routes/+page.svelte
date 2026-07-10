@@ -53,8 +53,13 @@
 		e.stopPropagation();
 		const page = pages[slug];
 		if (!page) return;
-		localStorage.setItem('rsvp-paste-text', page.content);
-		window.open('/rsvp', '_blank');
+		const sessionId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+		fetch('http://192.168.0.186:51730/api/speed-reader-start', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ session_id: sessionId, text: page.content }),
+		}).catch(() => {});
+		window.open(`http://192.168.0.186:51730/rsvp?session=${sessionId}`, '_blank');
 	}
 
 	function selectPage(slug: string) {
