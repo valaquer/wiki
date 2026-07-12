@@ -38,18 +38,6 @@ function parseFrontmatter(raw: string): { frontmatter: Record<string, string>; c
 	return { frontmatter: fm, content: match[2] };
 }
 
-function extractWikilinks(content: string): string[] {
-	const links: string[] = [];
-	const re = /\[\[([^\]]+)\]\]/g;
-	let m;
-	while ((m = re.exec(content)) !== null) {
-		const raw = m[1];
-		const slug = raw.includes("|") ? raw.split("|")[0] : raw;
-		links.push(slug);
-	}
-	return links;
-}
-
 async function loadSidebarOrder(): Promise<string[]> {
 	try {
 		const raw = await readFile(path.join(WIKI_DIR, "SIDEBAR.md"), "utf-8");
@@ -65,55 +53,69 @@ async function loadSidebarOrder(): Promise<string[]> {
 export async function load() {
 	const entries = await readdir(WIKI_DIR, { withFileTypes: true });
 	const pages: Record<string, WikiPage> = {};
+	const titleToSlug: Record<string, string> = {};
 
-	// Root-level .md files
+	// Root-level .md files (Home.md + any unsectioned files)
 	for (const entry of entries) {
 		if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name === "SIDEBAR.md") continue;
 		const raw = await readFile(path.join(WIKI_DIR, entry.name), "utf-8");
 		const slug = entry.name.replace(/\.md$/, "");
 		const { frontmatter, content } = parseFrontmatter(raw);
 		pages[slug] = { slug, title: slug, content, frontmatter };
+		titleToSlug[slug] = slug;
 	}
 
-	// Subdirectory .md files
+	// Section directories (top-level folders = sections)
+	const sectionMap = new Map<string, { groups: Map<string, SidebarPage[]>; pages: SidebarPage[] }>();
+
 	for (const entry of entries) {
 		if (!entry.isDirectory()) continue;
-		const subdir = entry.name;
-		const subFiles = await readdir(path.join(WIKI_DIR, subdir));
-		for (const file of subFiles.filter((f) => f.endsWith(".md")).sort()) {
-			const raw = await readFile(path.join(WIKI_DIR, subdir, file), "utf-8");
-			const slug = `${subdir}/${file.replace(/\.md$/, "")}`;
-			const title = file.replace(/\.md$/, "");
+		const sectionName = entry.name;
+		const sectionPath = path.join(WIKI_DIR, sectionName);
+		const sectionEntries = await readdir(sectionPath, { withFileTypes: true });
+
+		if (!sectionMap.has(sectionName)) {
+			sectionMap.set(sectionName, { groups: new Map(), pages: [] });
+		}
+		const sectionData = sectionMap.get(sectionName)!;
+
+		// Files directly in section folder = section pages
+		for (const subEntry of sectionEntries) {
+			if (!subEntry.isFile() || !subEntry.name.endsWith(".md")) continue;
+			const raw = await readFile(path.join(sectionPath, subEntry.name), "utf-8");
+			const title = subEntry.name.replace(/\.md$/, "");
+			const slug = `${sectionName}/${title}`;
 			const { frontmatter, content } = parseFrontmatter(raw);
 			pages[slug] = { slug, title, content, frontmatter };
+			titleToSlug[title] = slug;
+			sectionData.pages.push({ slug, title });
+		}
+
+		// Subdirectories within section = groups
+		for (const subEntry of sectionEntries) {
+			if (!subEntry.isDirectory()) continue;
+			const groupName = subEntry.name;
+			const groupPath = path.join(sectionPath, groupName);
+			const groupFiles = await readdir(groupPath);
+
+			if (!sectionData.groups.has(groupName)) {
+				sectionData.groups.set(groupName, []);
+			}
+			const groupPages = sectionData.groups.get(groupName)!;
+
+			for (const file of groupFiles.filter((f: string) => f.endsWith(".md")).sort()) {
+				const raw = await readFile(path.join(groupPath, file), "utf-8");
+				const title = file.replace(/\.md$/, "");
+				const slug = `${sectionName}/${groupName}/${title}`;
+				const { frontmatter, content } = parseFrontmatter(raw);
+				pages[slug] = { slug, title, content, frontmatter };
+				titleToSlug[title] = slug;
+				groupPages.push({ slug, title });
+			}
 		}
 	}
 
 	const sidebarOrder = await loadSidebarOrder();
-
-	// Build sections from frontmatter
-	const sectionMap = new Map<string, { groups: Map<string, SidebarPage[]>; pages: SidebarPage[] }>();
-
-	for (const [slug, page] of Object.entries(pages)) {
-		if (slug === "Home") continue;
-
-		const section = page.frontmatter.section;
-		if (!section) continue;
-
-		if (!sectionMap.has(section)) {
-			sectionMap.set(section, { groups: new Map(), pages: [] });
-		}
-
-		const sectionData = sectionMap.get(section)!;
-		const group = page.frontmatter.group;
-
-		if (group) {
-			if (!sectionData.groups.has(group)) sectionData.groups.set(group, []);
-			sectionData.groups.get(group)!.push({ slug, title: page.title });
-		} else {
-			sectionData.pages.push({ slug, title: page.title });
-		}
-	}
 
 	// Build ordered sections array
 	const sections: SidebarSection[] = [];
@@ -150,11 +152,11 @@ export async function load() {
 		sections.push({ title: sectionTitle, groups, pages: data.pages });
 	}
 
-	// Unsorted: pages without section
+	// Unsorted: root-level files (except Home)
 	const unsortedPages: SidebarPage[] = [];
 	for (const [slug, page] of Object.entries(pages)) {
 		if (slug === "Home") continue;
-		if (!page.frontmatter.section) {
+		if (!slug.includes("/")) {
 			unsortedPages.push({ slug, title: page.title });
 		}
 	}
@@ -168,5 +170,6 @@ export async function load() {
 		pages,
 		sections,
 		validPages: [...validPages],
+		titleToSlug,
 	};
 }

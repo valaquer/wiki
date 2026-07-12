@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { marked } from 'marked';
-	import { ChevronDown, ChevronUp, Gauge } from 'lucide-svelte';
+	import { ChevronDown, ChevronUp, Gauge, Files } from 'lucide-svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
 
@@ -24,6 +24,7 @@
 	let pages = $derived(data.pages);
 	let sections = $derived(data.sections);
 	let validPages = $derived(new Set(data.validPages));
+	let titleToSlug = $derived(data.titleToSlug as Record<string, string>);
 
 	let selectedPage = $state('Home');
 	let expandedSection: string | null = $state(null);
@@ -53,13 +54,13 @@
 		e.stopPropagation();
 		const page = pages[slug];
 		if (!page) return;
-		const sessionId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+		const filePath = `/Users/deepak-macmini/honeybloom/library/wiki/${slug}.md`;
+		// Primer handles session ID generation + tab opening
 		fetch('http://192.168.0.186:51730/api/speed-reader-start', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ session_id: sessionId, text: page.content }),
+			body: JSON.stringify({ filePath }),
 		}).catch(() => {});
-		window.open(`http://192.168.0.186:51730/rsvp?session=${sessionId}`, '_blank');
 	}
 
 	function selectPage(slug: string) {
@@ -70,10 +71,12 @@
 
 	function renderMarkdown(content: string): string {
 		const processed = content.replace(/\[\[([^\]]+)\]\]/g, (_, raw) => {
-			const slug = raw.includes('|') ? raw.split('|')[0] : raw;
+			const rawSlug = raw.includes('|') ? raw.split('|')[0] : raw;
 			const display = raw.includes('|') ? raw.split('|')[1] : raw;
-			if (validPages.has(slug)) {
-				return `<a class="wikilink" data-page="${slug}" href="#">${display}</a>`;
+			// Resolve by direct slug match first, then by title lookup
+			const resolved = validPages.has(rawSlug) ? rawSlug : titleToSlug[rawSlug];
+			if (resolved) {
+				return `<a class="wikilink" data-page="${resolved}" href="#">${display}</a>`;
 			}
 			return display;
 		});
@@ -85,10 +88,27 @@
 		if (target.classList.contains('wikilink')) {
 			e.preventDefault();
 			const page = target.getAttribute('data-page');
-			if (page && validPages.has(page)) {
-				selectPage(page);
+			if (page && (validPages.has(page) || titleToSlug[page])) {
+				selectPage(validPages.has(page) ? page : titleToSlug[page]);
 			}
 		}
+	}
+
+	let copyFlashSlug: string | null = $state(null);
+
+	function copyPath(slug: string, e: MouseEvent) {
+		e.stopPropagation();
+		const path = `Locate this article in the wiki: /Users/deepak-macmini/honeybloom/library/wiki/${slug}.md`;
+		try { navigator.clipboard.writeText(path); } catch {
+			const ta = document.createElement('textarea');
+			ta.value = path;
+			document.body.appendChild(ta);
+			ta.select();
+			document.execCommand('copy');
+			document.body.removeChild(ta);
+		}
+		copyFlashSlug = slug;
+		setTimeout(() => { copyFlashSlug = null; }, 1500);
 	}
 
 	let currentPage = $derived(pages[selectedPage]);
@@ -117,6 +137,9 @@
 				Home
 			</button>
 			{#if hoveredSlug === 'Home'}
+				<button class="wiki-speed-btn wiki-speed-visible" onclick={(e) => copyPath('Home', e)} title="Copy path">
+					<Files size={14} color={copyFlashSlug === 'Home' ? '#7a5e4a' : '#555'} />
+				</button>
 				<button class="wiki-speed-btn wiki-speed-visible" onclick={(e) => speedRead('Home', e)} title="Speed read">
 					<Gauge size={14} color="#555" />
 				</button>
@@ -147,6 +170,9 @@
 							{page.title}
 						</button>
 						{#if hoveredSlug === page.slug}
+							<button class="wiki-speed-btn wiki-speed-visible" onclick={(e) => copyPath(page.slug, e)} title="Copy path">
+								<Files size={14} color={copyFlashSlug === page.slug ? '#7a5e4a' : '#555'} />
+							</button>
 							<button class="wiki-speed-btn wiki-speed-visible" onclick={(e) => speedRead(page.slug, e)} title="Speed read">
 								<Gauge size={14} color="#555" />
 							</button>
@@ -166,6 +192,9 @@
 								{page.title}
 							</button>
 							{#if hoveredSlug === page.slug}
+								<button class="wiki-speed-btn wiki-speed-visible" onclick={(e) => copyPath(page.slug, e)} title="Copy path">
+									<Files size={14} color={copyFlashSlug === page.slug ? '#7a5e4a' : '#555'} />
+								</button>
 								<button class="wiki-speed-btn wiki-speed-visible" onclick={(e) => speedRead(page.slug, e)} title="Speed read">
 									<Gauge size={14} color="#555" />
 								</button>
@@ -200,7 +229,7 @@
 						{@html renderedContent}
 					</article>
 				{/if}
-				<div class="wiki-cache-code">Cache Code: W3F</div>
+				<div class="wiki-cache-code">Cache Code: F4D</div>
 			</div>
 		</div>
 	</main>
@@ -209,7 +238,7 @@
 <style>
 	.wiki-root {
 		display: grid;
-		grid-template-columns: 280px calc(50vw - 565px) 570px;
+		grid-template-columns: 320px calc(50vw - 605px) 570px;
 		height: 100vh;
 		background: var(--color-bg);
 		color: var(--color-text);
